@@ -253,8 +253,9 @@ class HarvestingBot:
             else:
                 print("--> [!] Sickle was matched, but failed to calculate position.")
         else:
-            # DO NOTHING. No fallback clicks.
-            print("--> [!] Sickle not found on screen. Skipping click entirely.")
+            # Sickle not found — return False to retry phase 2
+            print("--> [!] Sickle not found on screen. Retrying...")
+            return False
             
         time.sleep(1.0)
         
