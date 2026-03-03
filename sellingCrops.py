@@ -369,3 +369,59 @@ class SellingBot:
         
         print(f"--> [PHASE 3] Sold {slot_count} item(s) total.")
         return slot_count > 0
+
+    def collect_money(self):
+        """Open shop, click all sold_product_1.png to collect money, then close shop."""
+        print("--> [COLLECT] Looking for shop button...")
+        
+        if not self.get_adb_screenshot():
+            return False
+        
+        # Find and click shop button
+        shop_boxes = []
+        for template_name in self.templates.keys():
+            if template_name.startswith("shop_button_1"):
+                shop_boxes.extend(self.find_image(template_name, threshold=0.75, fast_mode=False, update_cache=False))
+        
+        if not shop_boxes:
+            print("--> [COLLECT] Shop button not found!")
+            return False
+        
+        first_shop = shop_boxes[0]
+        shop_x, shop_y = self.get_center(first_shop)
+        print(f"--> [COLLECT] Clicking shop button at ({shop_x}, {shop_y})...")
+        self.adb_click(shop_x, shop_y)
+        
+        time.sleep(0.5)
+        
+        # Take screenshot of shop interior
+        if not self.get_adb_screenshot():
+            return False
+        
+        # Find all sold products
+        sold_boxes = []
+        for template_name in self.templates.keys():
+            if template_name.startswith("sold_product_1"):
+                sold_boxes.extend(self.find_image(template_name, threshold=0.70, fast_mode=False, update_cache=False))
+        
+        if not sold_boxes:
+            print("--> [COLLECT] No sold products found. Closing shop...")
+            self.click_cross()
+            return False
+        
+        print(f"--> [COLLECT] Found {len(sold_boxes)} sold product(s). Collecting money...")
+        
+        # Click each sold product
+        for i, box in enumerate(sold_boxes):
+            sx, sy = self.get_center(box)
+            print(f"--> [COLLECT] Clicking sold product #{i+1} at ({sx}, {sy})...")
+            self.adb_click(sx, sy)
+            time.sleep(0.2)
+        
+        print(f"--> [COLLECT] Collected money from {len(sold_boxes)} product(s)!")
+        
+        # Close shop
+        time.sleep(0.3)
+        self.click_cross()
+        
+        return True

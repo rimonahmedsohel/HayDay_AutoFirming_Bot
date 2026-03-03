@@ -204,11 +204,6 @@ class HarvestingBot:
                 for box in sickle_boxes:
                     bx1, by1, bx2, by2 = box
                     if self.get_center(box) == best_sickle:
-                        # Draw a thick green rectangle around the found sickle
-                        debug_img = self.screen.copy()
-                        cv2.rectangle(debug_img, (bx1, by1), (bx2, by2), (0, 255, 0), 3)
-                        cv2.imwrite("sickle_debug.png", debug_img)
-                        print("Saved 'sickle_debug.png' to prove we found it!")
                         break
                 
                 # Grab the exact center of sickle
