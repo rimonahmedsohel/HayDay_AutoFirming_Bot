@@ -213,6 +213,8 @@ class SellingBot:
         # Loop: keep selling until no more empty slots
         slot_count = 0
         initial_empty_slots = 0
+        ad_clicked = False
+        self.sold_slot_positions = []  # Remember where we sold items
         while True:
             # Take a fresh screenshot of the shop interior
             if not self.get_adb_screenshot():
@@ -244,6 +246,7 @@ class SellingBot:
             first_slot = empty_slots[0]
             slot_x, slot_y = self.get_center(first_slot)
             print(f"--> [PHASE 3] Clicking first empty slot at ({slot_x}, {slot_y})...")
+            self.sold_slot_positions.append((slot_x, slot_y))  # Remember this position
             self.adb_click(slot_x, slot_y)
 
             
@@ -331,20 +334,48 @@ class SellingBot:
             if not self.get_adb_screenshot():
                 break
             
-            # Find and click ad button (only on 3rd slot when started with 8)
-            if slot_count >= 5 and initial_empty_slots == 8:
-                ad_boxes = []
-                for template_name in self.templates.keys():
-                    if template_name.startswith("ad_button_1"):
-                        ad_boxes.extend(self.find_image(template_name, threshold=0.70, fast_mode=False, update_cache=False))
-                
-                if not ad_boxes:
-                    print("--> [PHASE 3] Ad button not found, skipping...")
+            # Find and click ad button (only on last 3 slots: 8, 9, 10)
+            ad_slot_start = initial_empty_slots - 2  # e.g., 10-2=8, 8-2=6
+            if slot_count >= ad_slot_start and not ad_clicked:
+                if slot_count == ad_slot_start + 1:
+                    # Slot 9: retry for 2 seconds if ad wasn't found on slot 8
+                    print(f"--> [PHASE 3] Searching for ad button (2s retry)...")
+                    ad_found = False
+                    start_time = time.time()
+                    while time.time() - start_time < 2.0:
+                        if not self.get_adb_screenshot():
+                            break
+                        ad_boxes = []
+                        for template_name in self.templates.keys():
+                            if template_name.startswith("ad_button_1"):
+                                ad_boxes.extend(self.find_image(template_name, threshold=0.70, fast_mode=False, update_cache=False))
+                        if ad_boxes:
+                            ad_found = True
+                            break
+                        time.sleep(0.3)
+                    if ad_found:
+                        ad_box = ad_boxes[0]
+                        ad_x, ad_y = self.get_center(ad_box)
+                        print(f"--> [PHASE 3] Clicking ad button at ({ad_x}, {ad_y})...")
+                        self.adb_click(ad_x, ad_y)
+                        ad_clicked = True
+                    else:
+                        print("--> [PHASE 3] Ad button not found after 2s, skipping...")
                 else:
-                    ad_box = ad_boxes[0]
-                    ad_x, ad_y = self.get_center(ad_box)
-                    print(f"--> [PHASE 3] Clicking ad button at ({ad_x}, {ad_y})...")
-                    self.adb_click(ad_x, ad_y)
+                    # Slot 8 or 10: single search
+                    ad_boxes = []
+                    for template_name in self.templates.keys():
+                        if template_name.startswith("ad_button_1"):
+                            ad_boxes.extend(self.find_image(template_name, threshold=0.70, fast_mode=False, update_cache=False))
+                    
+                    if not ad_boxes:
+                        print("--> [PHASE 3] Ad button not found, skipping...")
+                    else:
+                        ad_box = ad_boxes[0]
+                        ad_x, ad_y = self.get_center(ad_box)
+                        print(f"--> [PHASE 3] Clicking ad button at ({ad_x}, {ad_y})...")
+                        self.adb_click(ad_x, ad_y)
+                        ad_clicked = True
 
             
             # Take a fresh screenshot
@@ -371,7 +402,12 @@ class SellingBot:
         return slot_count > 0
 
     def collect_money(self):
-        """Open shop, click all sold_product_1.png to collect money, then close shop."""
+        """Open shop and click all remembered sold slot positions to collect money."""
+        if not self.sold_slot_positions:
+            print("--> [COLLECT] No sold positions remembered. Skipping.")
+            return False
+        
+        print(f"--> [COLLECT] Will collect from {len(self.sold_slot_positions)} remembered slot(s).")
         print("--> [COLLECT] Looking for shop button...")
         
         if not self.get_adb_screenshot():
@@ -392,33 +428,16 @@ class SellingBot:
         print(f"--> [COLLECT] Clicking shop button at ({shop_x}, {shop_y})...")
         self.adb_click(shop_x, shop_y)
         
-        time.sleep(0.5)
+        time.sleep(1.0)
         
-        # Take screenshot of shop interior
-        if not self.get_adb_screenshot():
-            return False
-        
-        # Find all sold products
-        sold_boxes = []
-        for template_name in self.templates.keys():
-            if template_name.startswith("sold_product_1"):
-                sold_boxes.extend(self.find_image(template_name, threshold=0.70, fast_mode=False, update_cache=False))
-        
-        if not sold_boxes:
-            print("--> [COLLECT] No sold products found. Closing shop...")
-            self.click_cross()
-            return False
-        
-        print(f"--> [COLLECT] Found {len(sold_boxes)} sold product(s). Collecting money...")
-        
-        # Click each sold product
-        for i, box in enumerate(sold_boxes):
-            sx, sy = self.get_center(box)
-            print(f"--> [COLLECT] Clicking sold product #{i+1} at ({sx}, {sy})...")
+        # Click each remembered sold slot position
+        for i, (sx, sy) in enumerate(self.sold_slot_positions):
+            print(f"--> [COLLECT] Clicking sold slot #{i+1} at ({sx}, {sy})...")
             self.adb_click(sx, sy)
-            time.sleep(0.2)
+            time.sleep(0.3)
         
-        print(f"--> [COLLECT] Collected money from {len(sold_boxes)} product(s)!")
+        print(f"--> [COLLECT] Collected money from {len(self.sold_slot_positions)} slot(s)!")
+        self.sold_slot_positions = []  # Clear after collecting
         
         # Close shop
         time.sleep(0.3)
