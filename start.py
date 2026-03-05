@@ -4,13 +4,14 @@ import threading
 from planting import PlantingBot
 from harvesting import HarvestingBot
 from sellingCrops import SellingBot
+from crash_handler import CrashHandler
 
 is_running = True
 
 def listen_for_stop():
     global is_running
     print("\n[!] Emergency Stop Activated: Press 'ESC' at any time to kill the bot.")
-    keyboard.wait('esc')
+    keyboard.wait('f5')
     print("\n[!] ESC pressed. Stopping bot...")
     is_running = False
 
@@ -79,15 +80,23 @@ def do_collect_money(sell_bot):
         print("No money to collect.")
     return did_collect
 
-def wait_for_growth(seconds):
-    """Wait for crops to grow, printing status updates."""
+def wait_for_growth(seconds, crash_handler=None):
+    """Wait for crops to grow, printing status updates. Checks for crashes every 30s."""
     print(f"\n--- WAITING FOR CROPS TO GROW ({seconds}s) ---")
     remaining = seconds
+    time_since_crash_check = 0
     while remaining > 0 and is_running:
         print(f"Time remaining: {remaining} seconds...")
         sleep_duration = min(5, remaining)
         time.sleep(sleep_duration)
         remaining -= sleep_duration
+        time_since_crash_check += sleep_duration
+
+        # Check for crash every ~30 seconds during the wait
+        if crash_handler and time_since_crash_check >= 30:
+            time_since_crash_check = 0
+            if crash_handler.check_and_recover():
+                print("[CRASH] Recovered during growth wait. Continuing wait...")
 
 def run_master_loop():
     print("Bot online. Starting master sequence...")
@@ -96,6 +105,7 @@ def run_master_loop():
     plant_bot = PlantingBot()
     harvest_bot = HarvestingBot(shared_templates=plant_bot.templates)
     sell_bot = SellingBot(shared_templates=plant_bot.templates)
+    crash_handler = CrashHandler(shared_templates=plant_bot.templates)
     
     cycle_count = 0
 
@@ -111,18 +121,28 @@ def run_master_loop():
         if not plant_bot.get_adb_screenshot():
             print("Failed to capture screenshot. Retrying in 2s...")
             time.sleep(2)
+            if crash_handler.check_and_recover():
+                continue
             continue
-        do_planting(plant_bot)
+        planted = do_planting(plant_bot)
+        if not planted:
+            if crash_handler.check_and_recover():
+                continue
         if not is_running: break
         
-        # ---- STEP 2: Wait 135s ----
-        print("\n[STEP 2] Wait for crops to grow")
-        wait_for_growth(135)
+        # ---- STEP 2: Wait 135s (only if we actually planted) ----
+        if planted:
+            print("\n[STEP 2] Wait for crops to grow")
+            wait_for_growth(135, crash_handler)
+        else:
+            print("\n[STEP 2] Skipping wait — nothing was planted.")
         if not is_running: break
         
         # ---- STEP 3: Harvest ----
         print("\n[STEP 3] Harvest")
-        do_harvesting(harvest_bot)
+        if not do_harvesting(harvest_bot):
+            if crash_handler.check_and_recover():
+                continue
         if not is_running: break
         
         # ---- STEP 4: Plant → Sell → Wait remaining → Harvest → Collect Money ----
@@ -132,24 +152,34 @@ def run_master_loop():
         if not plant_bot.get_adb_screenshot():
             print("Failed to capture screenshot. Retrying in 2s...")
             time.sleep(2)
+            if crash_handler.check_and_recover():
+                continue
             continue
-        do_planting(plant_bot)
+        planted = do_planting(plant_bot)
+        if not planted:
+            if crash_handler.check_and_recover():
+                continue
         if not is_running: break
         plant_time = time.time()
         
         # 4b: Sell (while crops are growing)
-        do_selling(sell_bot)
+        if not do_selling(sell_bot):
+            if crash_handler.check_and_recover():
+                continue
         if not is_running: break
         
-        # 4c: Wait remaining growth time
-        elapsed = time.time() - plant_time
-        remaining = max(0, 135 - elapsed)
-        if remaining > 0:
-            wait_for_growth(int(remaining))
+        # 4c: Wait remaining growth time (only if we planted)
+        if planted:
+            elapsed = time.time() - plant_time
+            remaining = max(0, 135 - elapsed)
+            if remaining > 0:
+                wait_for_growth(int(remaining), crash_handler)
         if not is_running: break
         
         # 4d: Harvest
-        do_harvesting(harvest_bot)
+        if not do_harvesting(harvest_bot):
+            if crash_handler.check_and_recover():
+                continue
         if not is_running: break
         
         # 4e: Collect Money
