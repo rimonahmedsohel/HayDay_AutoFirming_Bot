@@ -276,68 +276,16 @@ class CrashHandler:
 
             # Move screen left to right 400px
             print("[CRASH] Moving screen by 400px...")
-            subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '500', '500', '700', '500', '300'])
+            subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '500', '500', '800', '500', '300'])
             time.sleep(1)
 
             # Zoom out
-            print("[CRASH] Zooming out screen (using direct ADB multi-touch)...")
+            print("[CRASH] Zooming out screen (using zoom.py)...")
             try:
-                def generate_pinch_script(dev='/dev/input/event4', center_x=450, center_y=800):
-                    cmds = []
-                    def evt(type_id, code_id, val_id): 
-                        cmds.append(f"sendevent {dev} {type_id} {code_id} {val_id}")
-                    
-                    start_dist = 350
-                    evt(3, 57, 100)
-                    evt(3, 53, center_x - start_dist)
-                    evt(3, 54, center_y - start_dist)
-                    evt(1, 330, 1)
-                    evt(0, 0, 0)
-                    
-                    evt(3, 47, 1)
-                    evt(3, 57, 101)
-                    evt(3, 53, center_x + start_dist)
-                    evt(3, 54, center_y + start_dist)
-                    evt(0, 0, 0)
-                    
-                    for d in range(start_dist, 10, -15):
-                        evt(3, 47, 0)
-                        evt(3, 53, center_x - d)
-                        evt(3, 54, center_y - d)
-                        
-                        evt(3, 47, 1)
-                        evt(3, 53, center_x + d)
-                        evt(3, 54, center_y + d)
-                        
-                        evt(0, 0, 0)
-                        
-                    evt(3, 47, 1)
-                    evt(3, 57, -1)
-                    evt(0, 0, 0)
-                    
-                    evt(3, 47, 0)
-                    evt(3, 57, -1)
-                    evt(1, 330, 0)
-                    evt(0, 0, 0)
-                    
-                    return "\n".join(cmds)
-
-                script_content = generate_pinch_script()
-                local_script_path = "pinch_zoom_crash.sh"
-                remote_script_path = "/sdcard/pinch_zoom_crash.sh"
-                
-                with open(local_script_path, "w") as f:
-                    f.write(script_content)
-                    
-                subprocess.run(["adb", "-s", "127.0.0.1:7555", "push", local_script_path, remote_script_path], 
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(["adb", "-s", "127.0.0.1:7555", "shell", "sh", remote_script_path])
-                print("[CRASH] ADB pinch-to-zoom executed successfully.")
-                
-                if os.path.exists(local_script_path):
-                    os.remove(local_script_path)
+                subprocess.run(["python", "zoom.py"])
+                time.sleep(1)
             except Exception as e:
-                print(f"[CRASH] Error during ADB zoom out: {e}")
+                print(f"[CRASH] Error during zoom out: {e}")
 
             print("[CRASH] Looking for an empty field to align the farm view...")
             # We must take a fresh screenshot since we just loaded the game and zoomed out
