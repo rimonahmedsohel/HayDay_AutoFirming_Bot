@@ -11,6 +11,7 @@ class SellingBot:
     def __init__(self, shared_templates=None):
         self.screen = None
         self.last_successful_scale = None
+        self.sold_slot_positions = []
         
         if shared_templates is not None:
             self.templates = shared_templates

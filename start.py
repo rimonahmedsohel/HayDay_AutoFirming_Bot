@@ -108,6 +108,7 @@ def run_master_loop():
     crash_handler = CrashHandler(shared_templates=plant_bot.templates)
     
     cycle_count = 0
+    consecutive_failures = 0
 
     while is_running:
         cycle_count += 1
@@ -116,77 +117,103 @@ def run_master_loop():
         print(f"         CYCLE #{cycle_count}")
         print("========================================")
         
+        cycle_success = False
+
+        # Sequence: Plant → Wait → Harvest → Plant → Sell → Wait → Harvest → Collect Money
+        
         # ---- STEP 1: Plant ----
         print("\n[STEP 1] Plant")
+        planted1 = False
         if not plant_bot.get_adb_screenshot():
             print("Failed to capture screenshot. Retrying in 2s...")
             time.sleep(2)
-            if crash_handler.check_and_recover():
-                continue
+            if crash_handler.check_and_recover(): continue
             continue
-        planted = do_planting(plant_bot)
-        if not planted:
-            if crash_handler.check_and_recover():
-                continue
+        
+        planted1 = do_planting(plant_bot)
+        if planted1:
+            cycle_success = True
+        else:
+            if crash_handler.check_and_recover(): continue
         if not is_running: break
         
-        # ---- STEP 2: Wait 135s (only if we actually planted) ----
-        if planted:
-            print("\n[STEP 2] Wait for crops to grow")
+        # ---- STEP 2: Wait (if planted) ----
+        if planted1:
+            print("\n[STEP 2] Wait for crops to grow (135s)")
             wait_for_growth(135, crash_handler)
         else:
             print("\n[STEP 2] Skipping wait — nothing was planted.")
         if not is_running: break
-        
+
         # ---- STEP 3: Harvest ----
         print("\n[STEP 3] Harvest")
         if not do_harvesting(harvest_bot):
-            if crash_handler.check_and_recover():
-                continue
+            if crash_handler.check_and_recover(): continue
+        else:
+            cycle_success = True
         if not is_running: break
-        
-        # ---- STEP 4: Plant → Sell → Wait remaining → Harvest → Collect Money ----
-        print("\n[STEP 4] Plant → Sell → Wait → Harvest → Collect Money")
-        
-        # 4a: Plant again
+
+        # ---- STEP 4: Plant ----
+        print("\n[STEP 4] Plant")
+        planted2 = False
         if not plant_bot.get_adb_screenshot():
             print("Failed to capture screenshot. Retrying in 2s...")
             time.sleep(2)
-            if crash_handler.check_and_recover():
-                continue
+            if crash_handler.check_and_recover(): continue
             continue
-        planted = do_planting(plant_bot)
-        if not planted:
-            if crash_handler.check_and_recover():
-                continue
+
+        planted2 = do_planting(plant_bot)
+        if planted2:
+            cycle_success = True
+        else:
+            if crash_handler.check_and_recover(): continue
         if not is_running: break
-        plant_time = time.time()
-        
-        # 4b: Sell (while crops are growing)
+
+        # ---- STEP 5: Sell ----
+        print("\n[STEP 5] Sell")
         if not do_selling(sell_bot):
-            if crash_handler.check_and_recover():
-                continue
+            if crash_handler.check_and_recover(): continue
+        else:
+            cycle_success = True
         if not is_running: break
-        
-        # 4c: Wait remaining growth time (only if we planted)
-        if planted:
-            elapsed = time.time() - plant_time
-            remaining = max(0, 135 - elapsed)
-            if remaining > 0:
-                wait_for_growth(int(remaining), crash_handler)
+
+        # ---- STEP 6: Wait (if planted) ----
+        if planted2:
+            print("\n[STEP 6] Wait for crops to grow (135s)")
+            wait_for_growth(135, crash_handler)
+        else:
+            print("\n[STEP 6] Skipping wait — nothing was planted.")
         if not is_running: break
-        
-        # 4d: Harvest
+
+        # ---- STEP 7: Harvest ----
+        print("\n[STEP 7] Harvest")
         if not do_harvesting(harvest_bot):
-            if crash_handler.check_and_recover():
-                continue
+            if crash_handler.check_and_recover(): continue
+        else:
+            cycle_success = True
         if not is_running: break
-        
-        # 4e: Collect Money
-        do_collect_money(sell_bot)
+
+        # ---- STEP 8: Collect Money ----
+        print("\n[STEP 8] Collect Money")
+        if do_collect_money(sell_bot):
+            cycle_success = True
+        else:
+            if crash_handler.check_and_recover(): continue
         if not is_running: break
-        
+
+        # Failure Handling
+        if not cycle_success:
+            consecutive_failures += 1
+            print(f"\n[!] Entire cycle failed! ({consecutive_failures}/3 consecutive failures)")
+            if consecutive_failures >= 3:
+                print("\n[CRASH] Cycle failed 3 times in a row! Forcing recovery...")
+                crash_handler.recover()
+                consecutive_failures = 0
+        else:
+            consecutive_failures = 0
+            
         print("\n--- CYCLE COMPLETE. ---")
+
 
 def main():
     stop_thread = threading.Thread(target=listen_for_stop, daemon=True)

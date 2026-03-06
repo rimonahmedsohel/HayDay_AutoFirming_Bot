@@ -271,13 +271,15 @@ class CrashHandler:
                     cx, cy = self.get_center(crow_matches[0])
                     print(f"[CRASH] Crow detected at ({cx}, {cy}). Clicking to dismiss...")
                     self.adb_click(cx, cy)
-                    time.sleep(2)
+                    print("[CRASH] Waiting 3 seconds for screen moving...")
+                    time.sleep(3)
                     break
 
-            # Move screen left to right 400px
+            # Move screen left to right
             print("[CRASH] Moving screen by 400px...")
-            subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '500', '500', '800', '500', '300'])
-            time.sleep(1)
+            subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '500', '500', '900', '500', '800'])
+            print("[CRASH] Waiting 3 seconds to trigger zoom.py...")
+            time.sleep(3)
 
             # Zoom out
             print("[CRASH] Zooming out screen (using zoom.py)...")
