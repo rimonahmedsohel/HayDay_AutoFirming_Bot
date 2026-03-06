@@ -277,7 +277,7 @@ class CrashHandler:
 
             # Move screen left to right
             print("[CRASH] Moving screen by 400px...")
-            subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '500', '500', '900', '500', '800'])
+            subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '500', '500', '950', '500', '800'])
             print("[CRASH] Waiting 3 seconds to trigger zoom.py...")
             time.sleep(3)
 

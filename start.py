@@ -125,13 +125,6 @@ def run_master_loop():
         
         cycle_success = False
 
-        # Sequence:
-        # Plant → Wait(135) → Harvest 1
-        #   IF Harvest 1 Silo Full -> Sell -> Plant -> Wait(Remaining) -> Harvest 2 -> Collect Money
-        #   IF Harvest 1 Success -> Plant -> Sell -> Wait(Remaining) -> Harvest 2
-        #       IF Harvest 2 Silo Full -> Sell -> Collect Money (Wait 30s) -> Loop
-        #       IF Harvest 2 Success -> Collect Money -> Loop
-        
         # ---- STEP 1: Plant ----
         print("\n[STEP 1] Plant")
         planted1 = False
@@ -139,6 +132,10 @@ def run_master_loop():
             print("Failed to capture screenshot. Retrying in 2s...")
             time.sleep(2)
             if crash_handler.check_and_recover(): continue
+            consecutive_failures += 1
+            if consecutive_failures >= 3:
+                crash_handler.recover()
+                consecutive_failures = 0
             continue
         
         planted1 = do_planting(plant_bot)
@@ -152,8 +149,8 @@ def run_master_loop():
         
         # ---- STEP 2: Wait (if planted) ----
         if planted1:
-            print("\n[STEP 2] Wait for crops to grow (135s)")
-            wait_for_growth(135, crash_handler)
+            print("\n[STEP 2] Wait for crops to grow (125s)")
+            wait_for_growth(125, crash_handler)
         else:
             print("\n[STEP 2] Skipping wait — nothing was planted.")
         if not is_running: break
@@ -166,7 +163,7 @@ def run_master_loop():
             cycle_success = True
             print("\n*** SILO FULL DETECTED DURING FIRST HARVEST! Diverting to Sell Flow... ***")
             
-            # Divert: Sell -> Wait 30s -> Collect Money -> Plant -> Wait (135) -> Harvest 2
+            # Divert: Sell -> Wait 30s -> Collect Money -> Plant -> Wait (125) -> Harvest 2
             print("\n[DIVERT] Sell")
             if not do_selling(sell_bot):
                 if crash_handler.check_and_recover(): continue
@@ -184,8 +181,8 @@ def run_master_loop():
                 divert_planted = do_planting(plant_bot)
             
             if divert_planted:
-                print("\n[DIVERT] Wait for crops to grow (135s)")
-                wait_for_growth(135, crash_handler)
+                print("\n[DIVERT] Wait for crops to grow (125s)")
+                wait_for_growth(125, crash_handler)
                 
             print("\n[DIVERT] Harvest")
             do_harvesting(harvest_bot)
@@ -209,6 +206,10 @@ def run_master_loop():
             print("Failed to capture screenshot. Retrying in 2s...")
             time.sleep(2)
             if crash_handler.check_and_recover(): continue
+            consecutive_failures += 1
+            if consecutive_failures >= 3:
+                crash_handler.recover()
+                consecutive_failures = 0
             continue
 
         planted2 = do_planting(plant_bot)
@@ -231,7 +232,7 @@ def run_master_loop():
         # ---- STEP 6: Wait (if planted) ----
         if planted2:
             elapsed = time.time() - plant_time_2
-            remaining = max(0, 135 - elapsed)
+            remaining = max(0, 125 - elapsed)
             print(f"\n[STEP 6] Wait for remaining crop growth ({int(remaining)}s)")
             if remaining > 0:
                 wait_for_growth(int(remaining), crash_handler)
@@ -255,8 +256,12 @@ def run_master_loop():
             if not do_selling(sell_bot):
                 if crash_handler.check_and_recover(): continue
                 
-            print("\n[DIVERT 2] Waiting 30s before restarting main loop...")
+            print("\n[DIVERT 2] Waiting 30s before final collect money...")
             wait_for_growth(30, crash_handler)
+            
+            print("\n[DIVERT 2] Final Collect Money")
+            if sell_bot.get_adb_screenshot():
+                do_collect_money(sell_bot)
             
             print("\n--- CYCLE COMPLETE (SILO FULL DIVERT 2). ---")
             consecutive_failures = 0

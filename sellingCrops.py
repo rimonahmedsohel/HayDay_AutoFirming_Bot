@@ -211,6 +211,25 @@ class SellingBot:
         
         # Wait a bit for the shop UI to open
         time.sleep(0.5)
+        
+        # --- NEW STEP: Pre-Collection ---
+        # If the bot restarts with a full shop, it needs to collect items first before selling.
+        if self.get_adb_screenshot():
+            sold_boxes = []
+            for template_name in self.templates.keys():
+                if template_name.startswith("sold_product_1"):
+                    # Use threshold 0.60 based on terminal testing
+                    sold_boxes.extend(self.find_image(template_name, threshold=0.60, fast_mode=False, update_cache=False))
+            
+            if sold_boxes:
+                print(f"--> [PHASE 3] Found {len(sold_boxes)} previously sold items! Collecting money first...")
+                for box in sold_boxes:
+                    sx, sy = self.get_center(box)
+                    self.adb_click(sx, sy)
+                    time.sleep(0.3)
+                print("--> [PHASE 3] Finished pre-collection. Waiting for slots to clear...")
+                time.sleep(1.0) # Let the collection animation finish so slots become empty
+        
         # Loop: keep selling until no more empty slots
         slot_count = 0
         initial_empty_slots = 0
