@@ -100,8 +100,17 @@ class HarvestingBot:
         screen_gray = cv2.cvtColor(self.screen, cv2.COLOR_BGR2GRAY)
         
         if len(template_img.shape) == 3 and template_img.shape[2] == 4:
-            template_img = cv2.cvtColor(template_img, cv2.COLOR_BGRA2BGR)
-        template_gray = cv2.cvtColor(template_img, cv2.COLOR_BGR2GRAY)
+            # Crop template to the bounding box of its opaque region (removes transparent edges)
+            alpha_channel = template_img[:, :, 3]
+            coords = cv2.findNonZero(alpha_channel)
+            if coords is not None:
+                x, y, w, h = cv2.boundingRect(coords)
+                template_img = template_img[y:y+h, x:x+w, :3]
+            else:
+                template_img = template_img[:, :, :3]
+            template_gray = cv2.cvtColor(template_img, cv2.COLOR_BGR2GRAY)
+        else:
+            template_gray = cv2.cvtColor(template_img, cv2.COLOR_BGR2GRAY)
         
         screen_h, screen_w = screen_gray.shape[:2]
         all_boxes = []
@@ -247,11 +256,51 @@ class HarvestingBot:
                 
             else:
                 print("--> [!] Sickle was matched, but failed to calculate position.")
+                return "FAIL"
         else:
-            # Sickle not found — return False to retry phase 2
+            # Sickle not found — return "FAIL" to retry phase 2
             print("--> [!] Sickle not found on screen. Retrying...")
-            return False
+            return "FAIL"
             
         time.sleep(1.0)
         
-        return True
+        # 3. Check if Silo is Full
+        print("--> [PHASE 2] Checking if Silo is Full...")
+        if not self.get_adb_screenshot():
+            return "FAIL"
+            
+        silo_full_boxes = []
+        for template_name in self.templates.keys():
+            if template_name.startswith("silo_full"):
+                # Use a much lower threshold (0.45) due to UI overlay/transparency differences
+                silo_full_boxes.extend(self.find_image(template_name, threshold=0.45, fast_mode=False, update_cache=False))
+                
+        if silo_full_boxes:
+            print("--> [PHASE 2] Silo Full detected! Clicking cross to dismiss...")
+            
+            # Find and click cross_1.png (using lower threshold and forcing wider scale range just in case)
+            cross_boxes = []
+            for template_name in self.templates.keys():
+                if template_name.startswith("cross_1"):
+                    # Temporarily force wider scales for the cross button specifically, as it can be large
+                    original_last_scale = self.last_successful_scale
+                    self.last_successful_scale = None # Disable fast mode caching for the cross
+                    
+                    cross_boxes.extend(self.find_image(template_name, threshold=0.65, fast_mode=False, update_cache=False))
+                    
+                    self.last_successful_scale = original_last_scale # Restore
+                    
+            if cross_boxes:
+                cross_box = cross_boxes[0]
+                cx, cy = self.get_center(cross_box)
+                print(f"--> [PHASE 2] Cross found at ({cx}, {cy}). Clicking...")
+                self.adb_click(cx, cy)
+                time.sleep(0.5)
+            else:
+                # Fallback click coordinate if cross not found (usually top right of the popup)
+                print("--> [PHASE 2] Cross not found, fallback clicking to dismiss silo full popup...")
+                self.adb_click(1350, 45) # Typical cross location based on debug scripts
+                
+            return "SILO_FULL"
+        
+        return "SUCCESS"
