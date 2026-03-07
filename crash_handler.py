@@ -100,11 +100,20 @@ class CrashHandler:
         if template_img is None:
             return []
 
+        # Special mask handling for mail.png which has a transparent background
+        use_mask = False
+        if template_name == "mail.png" and len(template_img.shape) == 3 and template_img.shape[2] == 4:
+            bgr_template = template_img[:, :, :3]
+            alpha_mask = template_img[:, :, 3]
+            use_mask = True
+            
         screen_gray = cv2.cvtColor(self.screen, cv2.COLOR_BGR2GRAY)
 
         if len(template_img.shape) == 3 and template_img.shape[2] == 4:
-            template_img = cv2.cvtColor(template_img, cv2.COLOR_BGRA2BGR)
-        template_gray = cv2.cvtColor(template_img, cv2.COLOR_BGR2GRAY)
+            template_img_no_alpha = cv2.cvtColor(template_img, cv2.COLOR_BGRA2BGR)
+        else:
+            template_img_no_alpha = template_img
+        template_gray = cv2.cvtColor(template_img_no_alpha, cv2.COLOR_BGR2GRAY)
 
         screen_h, screen_w = screen_gray.shape[:2]
         all_boxes = []
@@ -121,18 +130,32 @@ class CrashHandler:
             if resized_w > screen_w or resized_h > screen_h or resized_w < 5 or resized_h < 5:
                 continue
 
-            resized_template = cv2.resize(template_gray, (resized_w, resized_h))
-            res = cv2.matchTemplate(screen_gray, resized_template, cv2.TM_CCOEFF_NORMED)
-            loc = np.where(res >= threshold)
+            if use_mask:
+                resized_bgr = cv2.resize(bgr_template, (resized_w, resized_h))
+                resized_mask = cv2.resize(alpha_mask, (resized_w, resized_h))
+                res = cv2.matchTemplate(self.screen, resized_bgr, cv2.TM_CCORR_NORMED, mask=resized_mask)
+                
+                # Using a mask with TM_CCORR_NORMED yields extremely high false positives on flat backgrounds
+                # Instead of getting EVERY match with np.where and crashing Non-Max Suppression,
+                # we just find the absolute best match at this scale.
+                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+                if max_val >= 0.90:
+                    if update_cache:
+                        self.last_successful_scale = scale
+                    x1, y1 = max_loc
+                    all_boxes.append([x1, y1, x1 + resized_w, y1 + resized_h, max_val])
+            else:
+                resized_template = cv2.resize(template_gray, (resized_w, resized_h))
+                res = cv2.matchTemplate(screen_gray, resized_template, cv2.TM_CCOEFF_NORMED)
+                loc = np.where(res >= threshold)
 
-            if len(loc[0]) > 0 and update_cache:
-                self.last_successful_scale = scale
+                if len(loc[0]) > 0 and update_cache:
+                    self.last_successful_scale = scale
 
-            for pt in zip(*loc[::-1]):
-                score = res[pt[1]][pt[0]]
-                x1, y1 = int(pt[0]), int(pt[1])
-                x2, y2 = int(pt[0] + resized_w), int(pt[1] + resized_h)
-                all_boxes.append([x1, y1, x2, y2, score])
+                for pt in zip(*loc[::-1]):
+                    score = res[pt[1]][pt[0]]
+                    x1, y1 = int(pt[0]), int(pt[1])
+                    all_boxes.append([x1, y1, x1 + resized_w, y1 + resized_h, score])
 
         if not all_boxes:
             return []
@@ -142,10 +165,8 @@ class CrashHandler:
 
         final_boxes = []
         for i in picked_indices:
-            # Keep all 5 items: [x1, y1, x2, y2, score]
             final_boxes.append(boxes_np[i].tolist())
             
-        # Sort by score (index 4) descending so the best match is first
         final_boxes.sort(key=lambda x: x[4], reverse=True)
 
         return final_boxes
@@ -260,26 +281,40 @@ class CrashHandler:
                 time.sleep(2)
                 continue
 
-            # Check for crow popup after loading
-            print("[CRASH] Checking for crow popup (waiting up to 10s)..---.")
-            for _ in range(5):
-                time.sleep(2)
-                if not self.get_adb_screenshot(): continue
-                # Look for the crow text bubble to dismiss
+            # Check for crow popup after loading (ONLY ONCE)
+            print("[CRASH] Checking for crow popup...")
+            time.sleep(2)
+            if self.get_adb_screenshot():
                 crow_matches = self.find_image("crow.png", threshold=0.75)
                 if crow_matches:
                     cx, cy = self.get_center(crow_matches[0])
-                    print(f"[CRASH] Crow detected at ({cx}, {cy}). Clicking to dismiss...")
-                    self.adb_click(cx, cy)
-                    print("[CRASH] Waiting 3 seconds for screen moving...")
-                    time.sleep(3)
-                    break
-
-            # Move screen left to right
-            print("[CRASH] Moving screen by 400px...")
-            subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '500', '500', '950', '500', '800'])
-            print("[CRASH] Waiting 3 seconds to trigger zoom.py...")
-            time.sleep(3)
+                    print(f"[CRASH] Crow detected at ({cx}, {cy}). Clicking exact to dismiss...")
+                    subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(cx), str(cy)])
+                    time.sleep(2)
+                    
+            # Check for Mail icon
+            print("[CRASH] Checking if mail.png is present...")
+            if self.get_adb_screenshot():
+                # find_image now uses an alpha mask for mail.png, scoring 0.90+ naturally
+                mail_matches = self.find_image("mail.png")
+                if mail_matches:
+                    print("[CRASH] Mail icon detected! Panning top-to-bottom by 200px first...")
+                    # Swipe top to bottom (Y=300 to Y=500) to move the camera up
+                    subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '500', '300', '500', '500', '500'])
+                    time.sleep(1)
+                else:
+                    print("[CRASH] Mail icon NOT found.")
+            else:
+                print("[CRASH] Failed to get screenshot for mail check.")
+            
+            # Move screen left to right (and slightly down if needed) to find the fields
+            # We use Y=250 (top part of screen) to avoid clicking on the Farmhouse in the center
+            print("[CRASH] Panning screen to find fields...")
+            # Swipe to move left
+            subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '400', '250', '900', '250', '500'])
+            
+            print("[CRASH] Waiting 2 seconds after panning...")
+            time.sleep(2)
 
             # Zoom out
             print("[CRASH] Zooming out screen (using zoom.py)...")
