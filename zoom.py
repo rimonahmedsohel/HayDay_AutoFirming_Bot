@@ -1,21 +1,43 @@
 import socket
 import time
 import subprocess
+import os
+import sys
+from adb_path import get_adb_path, get_minitouch_path, CREATE_NO_WINDOW
 
 HOST = "127.0.0.1"
 PORT = 1111
 DEVICE = "127.0.0.1:7555"
+ADB = get_adb_path()
 
 
 def ensure_minitouch():
     print("[ZOOM] Checking if minitouch is running...")
-    
-    # Always ensure port forward is established first
+
+    # First check if minitouch binary exists on the device, push if missing
+    check = subprocess.run(
+        [ADB, '-s', DEVICE, 'shell', 'ls', '/data/local/tmp/minitouch'],
+        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+    )
+    if "No such file" in check.stderr or "No such file" in check.stdout:
+        print("[ZOOM] minitouch binary not found on device. Pushing...")
+        local_path = get_minitouch_path()
+        subprocess.run(
+            [ADB, '-s', DEVICE, 'push', local_path, '/data/local/tmp/minitouch'],
+            creationflags=CREATE_NO_WINDOW
+        )
+        subprocess.run(
+            [ADB, '-s', DEVICE, 'shell', 'chmod', '755', '/data/local/tmp/minitouch'],
+            creationflags=CREATE_NO_WINDOW
+        )
+        print("[ZOOM] minitouch binary pushed and made executable.")
+
+    # Ensure port forward is established
     subprocess.run(
-        f"adb -s {DEVICE} forward tcp:1111 localabstract:minitouch",
-        shell=True,
+        [ADB, '-s', DEVICE, 'forward', 'tcp:1111', 'localabstract:minitouch'],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        stderr=subprocess.DEVNULL,
+        creationflags=CREATE_NO_WINDOW
     )
 
     try:
@@ -31,20 +53,24 @@ def ensure_minitouch():
     except Exception as e:
         pass
 
-    print("[ZOOM] minitouch not active. Starting in a new terminal...")
-
-    import os
-    creationflags = 0
-    if hasattr(subprocess, 'CREATE_NEW_CONSOLE'):
-        creationflags |= subprocess.CREATE_NEW_CONSOLE
+    print("[ZOOM] minitouch not active. Starting in background...")
 
     subprocess.Popen(
-        f"adb -s {DEVICE} shell /data/local/tmp/minitouch",
-        shell=True,
-        creationflags=creationflags
+        [ADB, '-s', DEVICE, 'shell', '/data/local/tmp/minitouch'],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=CREATE_NO_WINDOW
     )
 
     time.sleep(2)
+
+    # Re-establish port forward after starting minitouch
+    subprocess.run(
+        [ADB, '-s', DEVICE, 'forward', 'tcp:1111', 'localabstract:minitouch'],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=CREATE_NO_WINDOW
+    )
 
 
 def send(sock, cmd):
@@ -93,5 +119,5 @@ def zoom_out(level=0.7):
     sock.close()
 
 
-# Example usage
-zoom_out(0.65)
+if __name__ == "__main__":
+    zoom_out(0.65)

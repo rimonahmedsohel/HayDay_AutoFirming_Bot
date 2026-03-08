@@ -3,20 +3,14 @@ import numpy as np
 import subprocess
 import os
 import time
-import keyboard
-import threading
 import math
+from adb_path import get_adb_path, get_images_dir, CREATE_NO_WINDOW
 
 # Configuration
-IMAGES_DIR = "images"
-is_running = True
+ADB = get_adb_path()
+IMAGES_DIR = get_images_dir()
 
-def listen_for_stop():
-    global is_running
-    print("\n[!] Emergency Stop Activated: Press 'ESC' at any time to kill the bot.")
-    keyboard.wait('esc')
-    print("\n[!] ESC pressed. Stopping bot...")
-    is_running = False
+
 
 class PlantingBot:
     def __init__(self, shared_templates=None):
@@ -47,15 +41,15 @@ class PlantingBot:
             return True
             
         try:
-            pipe = subprocess.Popen(['adb', '-s', '127.0.0.1:7555', 'shell', 'screencap', '-p'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            pipe = subprocess.Popen([ADB, '-s', '127.0.0.1:7555', 'shell', 'screencap', '-p'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=CREATE_NO_WINDOW)
             stdout, _ = pipe.communicate()
             stdout = stdout.replace(b'\r\n', b'\n')
             
             if not stdout:
                 print("Failed to get screenshot. Reconnecting ADB...")
-                subprocess.run(['adb', 'kill-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(['adb', 'start-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(['adb', 'connect', '127.0.0.1:7555'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run([ADB, 'kill-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+                subprocess.run([ADB, 'start-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+                subprocess.run([ADB, 'connect', '127.0.0.1:7555'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
                 return False
 
             image_array = np.frombuffer(stdout, dtype=np.uint8)
@@ -68,7 +62,7 @@ class PlantingBot:
         # Add slight variation to clicking
         x_rand = x + np.random.randint(-2, 3)
         y_rand = y + np.random.randint(-2, 3)
-        subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(x_rand), str(y_rand)])
+        subprocess.run([ADB, '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(x_rand), str(y_rand)], creationflags=CREATE_NO_WINDOW)
         time.sleep(0.3)
 
     def non_max_suppression(self, boxes, overlapThresh=0.3):
@@ -164,7 +158,7 @@ class PlantingBot:
         return (x1 + (x2 - x1)//2, y1 + (y2 - y1)//2)
 
     def adb_swipe(self, x1, y1, x2, y2, duration_ms=500):
-        subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', str(x1), str(y1), str(x2), str(y2), str(duration_ms)])
+        subprocess.run([ADB, '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', str(x1), str(y1), str(x2), str(y2), str(duration_ms)], creationflags=CREATE_NO_WINDOW)
         time.sleep(0.3)
 
     def exact_planting_sequence(self):
@@ -300,7 +294,7 @@ class PlantingBot:
         
         # Execute the sequence as one shell command
         full_command = " ; ".join(commands)
-        subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', full_command])
+        subprocess.run([ADB, '-s', '127.0.0.1:7555', 'shell', full_command], creationflags=CREATE_NO_WINDOW)
                 
         print("--> Planting batch complete!\n")
         time.sleep(1.0)
@@ -318,12 +312,6 @@ class PlantingBot:
                 print("--> [IDLE] No empty fields found. Waiting...")
                 time.sleep(2)
 
-def main():
-    stop_thread = threading.Thread(target=listen_for_stop, daemon=True)
-    stop_thread.start()
-    
+if __name__ == "__main__":
     bot = PlantingBot()
     bot.run_loop()
-
-if __name__ == "__main__":
-    main()

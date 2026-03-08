@@ -1,73 +1,104 @@
-# HayDay Auto-Farming Bot Logic & Flow
+<div align="center">
+  <h1>🌾 HFB — Hay Day Auto-Farming Bot</h1>
+  <p><strong>A fully autonomous, intelligent farming assistant for Hay Day</strong></p>
+  
+  [![Python](https://img.shields.io/badge/Python-3.x-blue.svg)](https://python.org)
+  [![OpenCV](https://img.shields.io/badge/OpenCV-Template%20Matching-green.svg)](https://opencv.org)
+  [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
+</div>
 
-This bot is designed to automate the complete farming cycle (Planting -> Selling -> Harvesting) in Hay Day using Python, OpenCV, and ADB. It uses scale-invariant template matching to dynamically locate UI elements regardless of the screen's zoom level.
+<br />
 
----
-
-## 🔁 Master Sequence (The Normal Flow)
-
-The core bot loop runs infinitely (until `ESC` is pressed). A single, flawless cycle looks exactly like this:
-
-1. **[STEP 1] Plant**: The bot searches for grown wheat fields first to find the origin, then clicks the empty fields in a zigzag pattern to plant wheat.
-2. **[STEP 2] Wait for Growth**: If seeds were successfully planted in Step 1, the bot waits for precisely 125 seconds for the wheat to grow.
-3. **[STEP 3] Harvest 1**: The bot locates grown wheat, clicks it to summon the sickle menu, grabs the sickle, and drags it in a zigzag pattern across the fields.
-4. **[STEP 4] Plant 2**: Immediately plants the newly harvested fields with wheat.
-5. **[STEP 5] Sell**: Opens the shop to sell the newly harvested wheat.
-    * *Pre-Collection:* Upon opening the shop, it first checks for previously sold items (`sold_product_1.png`). If found, it collects the money from those slots *before* trying to sell anything new.
-    * *Selling Loop:* It finds empty shop slots, lists wheat at maximum price, occasionally watches ads (for specific slots), and puts them on sale.
-6. **[STEP 6] Wait Remaining Growth**: Calculates how much time elapsed since Step 4 (Plant 2). It waits whatever time is left of the originally required 125 seconds.
-7. **[STEP 7] Harvest 2**: Harvests the second batch of crops.
-8. **[STEP 8] Collect Money**: Opens the roadside shop and clicks all the specific slots where it remembers placing items for sale during Step 5.
-
-*After Step 8, the cycle completes and begins again from Step 1.*
+HFB is a robust, production-ready Windows application that fully automates the agricultural lifecycle in Hay Day. It utilizes advanced computer vision (OpenCV scale-invariant template matching) and low-level device interaction (ADB + minitouch) via MuMu Player to seamlessly plant, harvest, and sell crops infinitely.
 
 ---
 
-## 🚦 Exceptional Flows
+## ✨ Features
 
-Sometimes things do not go perfectly. The bot constantly monitors the screen for edge cases and exceptions.
+- **🎮 All-in-One Standalone Application**: Built into a single `.exe` file with a sleek dark-themed GUI. No Python installation, ADB setup, or command-line experience required.
+- **🔄 Infinite Master Loop**: Autonomously cycles through Planting ➔ Harvesting ➔ Selling.
+- **🏗️ Resilient Error Handling & Crash Recovery**: If the game crashes, gets stuck, or the cycle fails 3 times, the bot automatically handles ADB restarts, re-launches the game, dismisses daily popups, and realigns the camera via a custom pinch-to-zoom injection.
+- **💰 Smart Selling & "Silo Full" Handling**: When the silo hits maximum capacity, the bot instantly diverts to the Roadside Shop, sells inventory, occasionally clicks ads, and safely waits before resuming the harvest.
+- **🧭 Dynamic Vision System**: Uses scale-invariant template matching to locate exact UI elements dynamically. The camera can move, but the bot will find what it needs.
+- **⚡ Background Execution**: The core processing and ADB commands run entirely in the background without stealing your mouse or launching annoying terminal windows.
 
-### 1. The "Silo Full" Exception
-If the Silo is full, the bot cannot harvest crops, which breaks the normal loop. To prevent a deadlock, the bot actively checks for the `silo_full.png` popup immediately after dragging the sickle.
+## 🚀 Quick Start (For Users)
 
-* **If detected during Harvest 1 (Step 3)**:
-  * The bot clicks the "Cross" to dismiss the popup.
-  * It immediately diverts to the **Sell Flow**:
-    * Sells current inventory.
-    * Waits 30 seconds for items to be purchased by other players.
-    * Collects the money.
-    * Plants new crops.
-    * Waits 125 seconds for them to grow.
-    * Harvests the crops (now that the silo has room).
-  * The cycle ends and restarts from the top.
+The easiest way to use the bot is to download the standalone `.exe` release.
 
-* **If detected during Harvest 2 (Step 7)**:
-  * Over 125s have passed since it last sold items in Step 5, so it diverts.
-  * The bot clicks the "Cross" to dismiss the popup.
-  * Collects money from previously listed items to clear shop space.
-  * Sells current inventory.
-  * Waits 30 seconds for items to be purchased by other players.
-  * Collects money again from the newly listed items.
-  * The cycle ends and restarts from the top.
+### Prerequisites
+1. **MuMu Player**: You must use MuMu Player (Android Emulator) to run Hay Day.
+2. **Resolution & Settings**: 
+   - Ensure the emulator resolution provides a clear view of the farm. 
+   - The bot connects to the default MuMu port: `127.0.0.1:7555`.
+3. **In-Game Setup**: Wait until your crops are empty and you are ready to plant Wheat.
 
-### 2. The 3-Strike Cycle Failure
-If a cycle completely fails—meaning *nothing* was planted, *nothing* was harvested, and *nothing* was sold—it will be marked as a failed cycle.
-* If **3 consecutive cycles** fail completely, the bot assumes there is a critical state error (e.g., UI glitch, stuck camera, network error).
-* It instantly triggers the **Crash Handler recovery sequence** to force-close and reboot the game.
-
-### 3. Application Crashes
-Every single action (Planting, Harvesting, Selling, and Waiting) is wrapped in crash detection. If the ADB `dumpsys` command detects that `com.supercell.hayday` is no longer the active foreground application, the bot halts execution and begins recovery.
+### Running the App
+1. Download `HFB.exe` from the [Releases](#) page.
+2. Double-click `HFB.exe` to launch the GUI.
+3. Verify your Hay Day game is open and running in MuMu Player.
+4. Click **▶ Start Bot**. The live log panel will display the connection status and progress.
+5. Click **■ Stop Bot** at any time to instantly lock the logic and halt the bot safely.
 
 ---
 
-## 🛠 Crash Recovery Sequence
-If the Crash Handler is triggered (via game crash OR 3-strike failure), the following happens:
-1. **Force Stop**: Kills any lingering `com.supercell.hayday` background processes via ADB.
-2. **Launch Game**: Sends an Android Intent via ADB shell to boot the app.
-3. **Monitor Loading**: Watches for `loadScreen.png`. If the game gets stuck on the loading screen for more than 35 seconds, it kills it and tries again (max 3 retries).
-4. **Post-Load Verification**:
-   * Waits and clicks the crow dialog (`crow.png`) to dismiss the daily news popup.
-   * Swipes the camera right by 400 pixels.
-   * Executes `zoom.py` (via background `minitouch` binary injection) to pinch-to-zoom completely out, ensuring maximum visibility for OpenCV.
-   * Locates the lowest available empty field on the farm and clicks it. This forces the Hay Day camera to pan downwards and perfectly align the farm into the bot's expected viewing angle.
-5. **Resume**: The Crash Handler yields back to `start.py` and the main loop continues exactly where it left off.
+## 💻 Building from Source (For Developers)
+
+If you'd like to modify the logic, adjust the timings, or build the executable yourself:
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/your-username/HayDay_AutoFirming_Bot.git
+cd HayDay_AutoFirming_Bot
+```
+
+### 2. Install Dependencies
+Ensure you have Python 3.9+ installed.
+```bash
+pip install opencv-python numpy pyinstaller
+```
+
+### 3. Build the Executable
+The repository includes a automated `build.bat` and `hfb.spec` configuration that bundles Python, OpenCV, the `minitouch` binary, and ADB platform-tools into a single windowless executable.
+
+Just run:
+```bash
+build.bat
+```
+*(Or manually run `python -m PyInstaller hfb.spec --noconfirm`)*
+
+The generated file will be located at `dist/HFB.exe`.
+
+---
+
+## 🧠 Core Architecture
+
+The system is highly modularized, utilizing several intelligent subsystems:
+
+- **`hfb_app.py`**: The main Tkinter application wrapper that controls the thread lifecycle, hooks `sys.stdout` for live UI logging, and manages ADB connections.
+- **`start.py`**: The "Master Loop." Orchestrates the timings, states, and the 3-strike failure mechanism.
+- **`planting.py`**: Locates empty fields using `cv2.matchTemplate`, intelligently clicks the last available field to auto-pan the camera, and uses raw `motionevent` drags to plant seeds in a localized zigzag pattern.
+- **`harvesting.py`**: Detects fully grown wheat, locates the sickle menu dynamically, and performs the sweep. Also handles "Silo Full" interrupt detection.
+- **`sellingCrops.py`**: Manages the roadside shop. Remembers slot coordinates dynamically to avoid relying purely on image recognition to collect money later.
+- **`crash_handler.py`**: Monitors Android `mCurrentFocus` via ADB `dumpsys`. Re-launches the `com.supercell.hayday` intent on failure.
+- **`zoom.py`**: Due to ADB `input swipe` limitations with multi-touch, this script pushes and executes `minitouch` natively on the Android side over a TCP socket to execute a true hardware-level pinch-to-zoom gesture during crash recovery.
+
+---
+
+## 🤝 Contributing
+
+Pull requests are actively welcomed! Whether it's adding support for other crops, optimizing the OpenCV thresholds, or improving the macro speed:
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
+
+<div align="center">
+  <sub>Built with ❤️ by the community. Educational purposes only.</sub>
+</div>

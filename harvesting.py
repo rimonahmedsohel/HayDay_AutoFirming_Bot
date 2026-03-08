@@ -3,9 +3,11 @@ import numpy as np
 import subprocess
 import os
 import time
+from adb_path import get_adb_path, get_images_dir, CREATE_NO_WINDOW
 
 # Configuration
-IMAGES_DIR = "images"
+ADB = get_adb_path()
+IMAGES_DIR = get_images_dir()
 
 class HarvestingBot:
     def __init__(self, shared_templates=None):
@@ -36,7 +38,7 @@ class HarvestingBot:
             return True
             
         try:
-            pipe = subprocess.Popen(['adb', '-s', '127.0.0.1:7555', 'shell', 'screencap', '-p'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            pipe = subprocess.Popen([ADB, '-s', '127.0.0.1:7555', 'shell', 'screencap', '-p'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=CREATE_NO_WINDOW)
             stdout, _ = pipe.communicate()
             stdout = stdout.replace(b'\r\n', b'\n')
             
@@ -52,7 +54,7 @@ class HarvestingBot:
     def adb_click(self, x, y):
         x_rand = x + np.random.randint(-2, 3)
         y_rand = y + np.random.randint(-2, 3)
-        subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(x_rand), str(y_rand)])
+        subprocess.run([ADB, '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(x_rand), str(y_rand)], creationflags=CREATE_NO_WINDOW)
         time.sleep(0.3)
 
     def non_max_suppression(self, boxes, overlapThresh=0.3):
@@ -252,7 +254,7 @@ class HarvestingBot:
                 commands.append(f"input motionevent UP {sweep_points[-1][0]} {sweep_points[-1][1]}")
                 
                 full_command = " ; ".join(commands)
-                subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', full_command])
+                subprocess.run([ADB, '-s', '127.0.0.1:7555', 'shell', full_command], creationflags=CREATE_NO_WINDOW)
                 
             else:
                 print("--> [!] Sickle was matched, but failed to calculate position.")

@@ -1,25 +1,25 @@
 import time
-import keyboard
 import threading
 from planting import PlantingBot
 from harvesting import HarvestingBot
 from sellingCrops import SellingBot
 from crash_handler import CrashHandler
 
-is_running = True
+# Global stop flag — controlled by the GUI
+_is_running = True
 
-def listen_for_stop():
-    global is_running
-    print("\n[!] Emergency Stop Activated: Press 'ESC' at any time to kill the bot.")
-    keyboard.wait('f5')
-    print("\n[!] ESC pressed. Stopping bot...")
-    is_running = False
+def set_running(val):
+    global _is_running
+    _is_running = val
+
+def get_running():
+    return _is_running
 
 def do_planting(plant_bot):
     """Try planting up to 3 times. Returns True if planting succeeded."""
     print("\n--- PLANTING PHASE ---")
     for attempt in range(1, 4):
-        if not is_running: return False
+        if not _is_running: return False
         print(f"Planting Attempt {attempt} of 3...")
         if attempt > 1:
             if not plant_bot.get_adb_screenshot():
@@ -40,7 +40,7 @@ def do_harvesting(harvest_bot):
     """Try harvesting up to 3 times. Returns 'SUCCESS', 'SILO_FULL', or 'FAIL'."""
     print("\n--- HARVESTING PHASE ---")
     for attempt in range(1, 4):
-        if not is_running: return "FAIL"
+        if not _is_running: return "FAIL"
         print(f"Harvesting Attempt {attempt} of 3...")
         if not harvest_bot.get_adb_screenshot():
             print("Failed to capture screenshot for Harvesting. Retrying...")
@@ -91,7 +91,7 @@ def wait_for_growth(seconds, crash_handler=None):
     print(f"\n--- WAITING FOR CROPS TO GROW ({seconds}s) ---")
     remaining = seconds
     time_since_crash_check = 0
-    while remaining > 0 and is_running:
+    while remaining > 0 and _is_running:
         print(f"Time remaining: {remaining} seconds...")
         sleep_duration = min(5, remaining)
         time.sleep(sleep_duration)
@@ -116,7 +116,7 @@ def run_master_loop():
     cycle_count = 0
     consecutive_failures = 0
 
-    while is_running:
+    while _is_running:
         cycle_count += 1
         
         print("\n========================================")
@@ -143,7 +143,7 @@ def run_master_loop():
             cycle_success = True
         else:
             if crash_handler.check_and_recover(): continue
-        if not is_running: break
+        if not _is_running: break
         
         plant_time_1 = time.time()
         
@@ -153,7 +153,7 @@ def run_master_loop():
             wait_for_growth(125, crash_handler)
         else:
             print("\n[STEP 2] Skipping wait — nothing was planted.")
-        if not is_running: break
+        if not _is_running: break
 
         # ---- STEP 3: Harvest 1 ----
         print("\n[STEP 3] Harvest 1")
@@ -168,8 +168,8 @@ def run_master_loop():
             if not do_selling(sell_bot):
                 if crash_handler.check_and_recover(): continue
                 
-            print("\n[DIVERT] Waiting 30s before collecting money as requested...")
-            wait_for_growth(30, crash_handler)
+            print("\n[DIVERT] Waiting 70s before collecting money...")
+            wait_for_growth(70, crash_handler)
             
             print("\n[DIVERT] Collect Money")
             if sell_bot.get_adb_screenshot():
@@ -195,7 +195,7 @@ def run_master_loop():
             cycle_success = True
         else:
             if crash_handler.check_and_recover(): continue
-        if not is_running: break
+        if not _is_running: break
 
         # === NORMAL FLOW ===
 
@@ -217,7 +217,7 @@ def run_master_loop():
             cycle_success = True
         else:
             if crash_handler.check_and_recover(): continue
-        if not is_running: break
+        if not _is_running: break
         
         plant_time_2 = time.time()
 
@@ -227,7 +227,7 @@ def run_master_loop():
             if crash_handler.check_and_recover(): continue
         else:
             cycle_success = True
-        if not is_running: break
+        if not _is_running: break
 
         # ---- STEP 6: Wait (if planted) ----
         if planted2:
@@ -238,7 +238,7 @@ def run_master_loop():
                 wait_for_growth(int(remaining), crash_handler)
         else:
             print("\n[STEP 6] Skipping wait — nothing was planted.")
-        if not is_running: break
+        if not _is_running: break
 
         # ---- STEP 7: Harvest 2 ----
         print("\n[STEP 7] Harvest 2")
@@ -256,8 +256,8 @@ def run_master_loop():
             if not do_selling(sell_bot):
                 if crash_handler.check_and_recover(): continue
                 
-            print("\n[DIVERT 2] Waiting 30s before final collect money...")
-            wait_for_growth(30, crash_handler)
+            print("\n[DIVERT 2] Waiting 70s before final collect money...")
+            wait_for_growth(70, crash_handler)
             
             print("\n[DIVERT 2] Final Collect Money")
             if sell_bot.get_adb_screenshot():
@@ -271,7 +271,7 @@ def run_master_loop():
             cycle_success = True
         else:
             if crash_handler.check_and_recover(): continue
-        if not is_running: break
+        if not _is_running: break
 
         # ---- STEP 8: Collect Money ----
         print("\n[STEP 8] Collect Money")
@@ -279,7 +279,7 @@ def run_master_loop():
             cycle_success = True
         else:
             if crash_handler.check_and_recover(): continue
-        if not is_running: break
+        if not _is_running: break
 
         # Failure Handling
         if not cycle_success:
@@ -294,12 +294,8 @@ def run_master_loop():
             
         print("\n--- CYCLE COMPLETE. ---")
 
+    print("\n[BOT] Bot stopped.")
 
-def main():
-    stop_thread = threading.Thread(target=listen_for_stop, daemon=True)
-    stop_thread.start()
-    
-    run_master_loop()
 
 if __name__ == "__main__":
-    main()
+    run_master_loop()

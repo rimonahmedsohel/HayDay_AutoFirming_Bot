@@ -3,9 +3,11 @@ import numpy as np
 import subprocess
 import os
 import time
+from adb_path import get_adb_path, get_images_dir, CREATE_NO_WINDOW
 
 # Configuration
-IMAGES_DIR = "images"
+ADB = get_adb_path()
+IMAGES_DIR = get_images_dir()
 
 class SellingBot:
     def __init__(self, shared_templates=None):
@@ -37,15 +39,15 @@ class SellingBot:
             return True
             
         try:
-            pipe = subprocess.Popen(['adb', '-s', '127.0.0.1:7555', 'shell', 'screencap', '-p'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            pipe = subprocess.Popen([ADB, '-s', '127.0.0.1:7555', 'shell', 'screencap', '-p'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=CREATE_NO_WINDOW)
             try:
                 stdout, _ = pipe.communicate(timeout=10)
             except subprocess.TimeoutExpired:
                 pipe.kill()
                 print("--> [ADB] Screenshot timed out! Reconnecting...")
-                subprocess.run(['adb', 'kill-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(['adb', 'start-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(['adb', 'connect', '127.0.0.1:7555'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run([ADB, 'kill-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+                subprocess.run([ADB, 'start-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+                subprocess.run([ADB, 'connect', '127.0.0.1:7555'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
                 return False
                 
             stdout = stdout.replace(b'\r\n', b'\n')
@@ -62,7 +64,7 @@ class SellingBot:
     def adb_click(self, x, y):
         x_rand = x + np.random.randint(-2, 3)
         y_rand = y + np.random.randint(-2, 3)
-        subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(x_rand), str(y_rand)])
+        subprocess.run([ADB, '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(x_rand), str(y_rand)], creationflags=CREATE_NO_WINDOW)
         time.sleep(0.3)
 
     def non_max_suppression(self, boxes, overlapThresh=0.3):
@@ -266,7 +268,6 @@ class SellingBot:
             first_slot = empty_slots[0]
             slot_x, slot_y = self.get_center(first_slot)
             print(f"--> [PHASE 3] Clicking first empty slot at ({slot_x}, {slot_y})...")
-            self.sold_slot_positions.append((slot_x, slot_y))  # Remember this position
             self.adb_click(slot_x, slot_y)
 
             
@@ -416,18 +417,14 @@ class SellingBot:
             sell_x, sell_y = self.get_center(sell_box)
             print(f"--> [PHASE 3] Clicking put on sale button at ({sell_x}, {sell_y})...")
             self.adb_click(sell_x, sell_y)
+            self.sold_slot_positions.append((slot_x, slot_y))  # Remember this position only after successful sale
 
         
         print(f"--> [PHASE 3] Sold {slot_count} item(s) total.")
         return slot_count > 0
 
     def collect_money(self):
-        """Open shop and click all remembered sold slot positions to collect money."""
-        if not self.sold_slot_positions:
-            print("--> [COLLECT] No sold positions remembered. Skipping.")
-            return False
-        
-        print(f"--> [COLLECT] Will collect from {len(self.sold_slot_positions)} remembered slot(s).")
+        """Open shop and visually detect sold items to collect money."""
         print("--> [COLLECT] Looking for shop button...")
         
         if not self.get_adb_screenshot():
@@ -450,14 +447,33 @@ class SellingBot:
         
         time.sleep(1.0)
         
-        # Click each remembered sold slot position
-        for i, (sx, sy) in enumerate(self.sold_slot_positions):
-            print(f"--> [COLLECT] Clicking sold slot #{i+1} at ({sx}, {sy})...")
+        # Take a screenshot of the shop interior
+        if not self.get_adb_screenshot():
+            print("--> [COLLECT] Failed to take screenshot inside the shop.")
+            return False
+        
+        # Visually detect sold items using sold_product_1 template
+        sold_boxes = []
+        for template_name in self.templates.keys():
+            if template_name.startswith("sold_product_1"):
+                sold_boxes.extend(self.find_image(template_name, threshold=0.60, fast_mode=False, update_cache=False))
+        
+        if not sold_boxes:
+            print("--> [COLLECT] No sold items found in shop. Nothing to collect.")
+            # Close shop
+            self.click_cross()
+            self.sold_slot_positions = []
+            return False
+        
+        print(f"--> [COLLECT] Found {len(sold_boxes)} sold item(s)! Collecting money...")
+        for i, box in enumerate(sold_boxes):
+            sx, sy = self.get_center(box)
+            print(f"--> [COLLECT] Clicking sold item #{i+1} at ({sx}, {sy})...")
             self.adb_click(sx, sy)
             time.sleep(0.3)
         
-        print(f"--> [COLLECT] Collected money from {len(self.sold_slot_positions)} slot(s)!")
-        self.sold_slot_positions = []  # Clear after collecting
+        print(f"--> [COLLECT] Collected money from {len(sold_boxes)} item(s)!")
+        self.sold_slot_positions = []  # Clear remembered positions
         
         # Close shop
         time.sleep(0.3)

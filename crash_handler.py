@@ -3,9 +3,11 @@ import numpy as np
 import subprocess
 import os
 import time
+from adb_path import get_adb_path, get_images_dir, CREATE_NO_WINDOW
 
 # Configuration
-IMAGES_DIR = "images"
+ADB = get_adb_path()
+IMAGES_DIR = get_images_dir()
 
 
 class CrashHandler:
@@ -28,17 +30,18 @@ class CrashHandler:
     def get_adb_screenshot(self):
         try:
             pipe = subprocess.Popen(
-                ['adb', '-s', '127.0.0.1:7555', 'shell', 'screencap', '-p'],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                [ADB, '-s', '127.0.0.1:7555', 'shell', 'screencap', '-p'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                creationflags=CREATE_NO_WINDOW
             )
             stdout, _ = pipe.communicate()
             stdout = stdout.replace(b'\r\n', b'\n')
 
             if not stdout:
                 print("[CRASH] Failed to get screenshot. Reconnecting ADB...")
-                subprocess.run(['adb', 'kill-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(['adb', 'start-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(['adb', 'connect', '127.0.0.1:7555'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run([ADB, 'kill-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+                subprocess.run([ADB, 'start-server'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
+                subprocess.run([ADB, 'connect', '127.0.0.1:7555'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW)
                 return False
 
             image_array = np.frombuffer(stdout, dtype=np.uint8)
@@ -51,7 +54,7 @@ class CrashHandler:
     def adb_click(self, x, y):
         x_rand = int(x + np.random.randint(-2, 3))
         y_rand = int(y + np.random.randint(-2, 3))
-        subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(x_rand), str(y_rand)])
+        subprocess.run([ADB, '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(x_rand), str(y_rand)], creationflags=CREATE_NO_WINDOW)
         time.sleep(0.3)
 
     def non_max_suppression(self, boxes, overlapThresh=0.3):
@@ -100,12 +103,13 @@ class CrashHandler:
         if template_img is None:
             return []
 
-        # Special mask handling for mail.png which has a transparent background
+        # Use an alpha mask only if the template has 4 channels AND actually contains transparent pixels
         use_mask = False
-        if template_name == "mail.png" and len(template_img.shape) == 3 and template_img.shape[2] == 4:
-            bgr_template = template_img[:, :, :3]
+        if len(template_img.shape) == 3 and template_img.shape[2] == 4:
             alpha_mask = template_img[:, :, 3]
-            use_mask = True
+            if np.any(alpha_mask < 255):
+                bgr_template = template_img[:, :, :3]
+                use_mask = True
             
         screen_gray = cv2.cvtColor(self.screen, cv2.COLOR_BGR2GRAY)
 
@@ -121,7 +125,8 @@ class CrashHandler:
         if fast_mode and self.last_successful_scale is not None:
             scales = [self.last_successful_scale]
         else:
-            scales = np.linspace(0.6, 1.4, 18)
+            # Wide scale range to handle both small and large templates
+            scales = np.linspace(0.2, 1.4, 25)
 
         for scale in scales:
             resized_w = int(template_gray.shape[1] * scale)
@@ -133,17 +138,17 @@ class CrashHandler:
             if use_mask:
                 resized_bgr = cv2.resize(bgr_template, (resized_w, resized_h))
                 resized_mask = cv2.resize(alpha_mask, (resized_w, resized_h))
-                res = cv2.matchTemplate(self.screen, resized_bgr, cv2.TM_CCORR_NORMED, mask=resized_mask)
+                res = cv2.matchTemplate(self.screen, resized_bgr, cv2.TM_SQDIFF_NORMED, mask=resized_mask)
                 
-                # Using a mask with TM_CCORR_NORMED yields extremely high false positives on flat backgrounds
-                # Instead of getting EVERY match with np.where and crashing Non-Max Suppression,
-                # we just find the absolute best match at this scale.
+                # TM_SQDIFF_NORMED: 0 is perfect match. We look for min_val <= 0.15
                 min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-                if max_val >= 0.90:
+                if min_val <= 0.15:
                     if update_cache:
                         self.last_successful_scale = scale
-                    x1, y1 = max_loc
-                    all_boxes.append([x1, y1, x1 + resized_w, y1 + resized_h, max_val])
+                    x1, y1 = min_loc
+                    # Invert min_val to behave like a positive score for sorting boxes
+                    score = 1.0 - min_val
+                    all_boxes.append([x1, y1, x1 + resized_w, y1 + resized_h, score])
             else:
                 resized_template = cv2.resize(template_gray, (resized_w, resized_h))
                 res = cv2.matchTemplate(screen_gray, resized_template, cv2.TM_CCOEFF_NORMED)
@@ -188,8 +193,8 @@ class CrashHandler:
         try:
             # Check the focused window using dumpsys window displays
             result = subprocess.run(
-                ['adb', '-s', '127.0.0.1:7555', 'shell', 'dumpsys', 'window', 'displays'],
-                capture_output=True, text=True
+                [ADB, '-s', '127.0.0.1:7555', 'shell', 'dumpsys', 'window', 'displays'],
+                capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
             )
             for line in result.stdout.splitlines():
                 if 'mCurrentFocus' in line:
@@ -215,16 +220,16 @@ class CrashHandler:
             # Force-close any existing Hay Day instance first
             print(f"[CRASH] Recovery attempt {retry}/{max_retries} — force-closing Hay Day...")
             subprocess.run(
-                ['adb', '-s', '127.0.0.1:7555', 'shell', 'am', 'force-stop', 'com.supercell.hayday'],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                [ADB, '-s', '127.0.0.1:7555', 'shell', 'am', 'force-stop', 'com.supercell.hayday'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW
             )
             time.sleep(2)
             print(f"[CRASH] Launching Hay Day via ADB...")
 
             try:
                 result = subprocess.run(
-                    ['adb', '-s', '127.0.0.1:7555', 'shell', 'monkey', '-p', 'com.supercell.hayday', '-c', 'android.intent.category.LAUNCHER', '1'],
-                    capture_output=True, text=True
+                    [ADB, '-s', '127.0.0.1:7555', 'shell', 'monkey', '-p', 'com.supercell.hayday', '-c', 'android.intent.category.LAUNCHER', '1'],
+                    capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
                 )
                 if 'Events injected: 1' not in result.stdout:
                     print(f"[CRASH] Launch command failed: {result.stdout.strip()}")
@@ -268,8 +273,8 @@ class CrashHandler:
 
             if stuck:
                 subprocess.run(
-                    ['adb', '-s', '127.0.0.1:7555', 'shell', 'am', 'force-stop', 'com.supercell.hayday'],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    [ADB, '-s', '127.0.0.1:7555', 'shell', 'am', 'force-stop', 'com.supercell.hayday'],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW
                 )
                 time.sleep(3)
                 continue  # Retry the launch
@@ -281,37 +286,42 @@ class CrashHandler:
                 time.sleep(2)
                 continue
 
-            # Check for crow popup after loading (ONLY ONCE)
-            print("[CRASH] Checking for crow popup...")
-            time.sleep(2)
-            if self.get_adb_screenshot():
-                crow_matches = self.find_image("crow.png", threshold=0.75)
-                if crow_matches:
-                    cx, cy = self.get_center(crow_matches[0])
-                    print(f"[CRASH] Crow detected at ({cx}, {cy}). Clicking exact to dismiss...")
-                    subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(cx), str(cy)])
-                    time.sleep(2)
-                    
-            # Check for Mail icon
-            print("[CRASH] Checking if mail.png is present...")
-            if self.get_adb_screenshot():
-                # find_image now uses an alpha mask for mail.png, scoring 0.90+ naturally
-                mail_matches = self.find_image("mail.png")
-                if mail_matches:
-                    print("[CRASH] Mail icon detected! Panning top-to-bottom by 200px first...")
-                    # Swipe top to bottom (Y=300 to Y=500) to move the camera up
-                    subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '500', '300', '500', '500', '500'])
-                    time.sleep(1)
-                else:
-                    print("[CRASH] Mail icon NOT found.")
-            else:
-                print("[CRASH] Failed to get screenshot for mail check.")
+            # Wait up to 10 seconds for the crow popup after loading
+            print("[CRASH] Waiting up to 10 seconds for crow popup...")
+            crow_found = False
+            for _ in range(10):
+                if self.get_adb_screenshot():
+                    # threshold=0.65 works for the large crow.png (best match ~0.67)
+                    crow_matches = self.find_image("crow.png", threshold=0.65)
+                    if crow_matches:
+                        cx, cy = self.get_center(crow_matches[0])
+                        print(f"[CRASH] Crow detected at ({cx}, {cy}). Waiting 3 seconds before clicking...")
+                        time.sleep(3)
+                        print("[CRASH] Clicking exact to dismiss crow...")
+                        subprocess.run([ADB, '-s', '127.0.0.1:7555', 'shell', 'input', 'tap', str(cx), str(cy)], creationflags=CREATE_NO_WINDOW)
+                        crow_found = True
+                        time.sleep(2)
+                        break
+                time.sleep(1)
             
-            # Move screen left to right (and slightly down if needed) to find the fields
-            # We use Y=250 (top part of screen) to avoid clicking on the Farmhouse in the center
-            print("[CRASH] Panning screen to find fields...")
-            # Swipe to move left
-            subprocess.run(['adb', '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '400', '250', '900', '250', '500'])
+            if not crow_found:
+                print("[CRASH] Crow popup skipped (not found within 10s).")
+
+            # Wait 3 seconds after crow functionality
+            print("[CRASH] Waiting 3 seconds...")
+            time.sleep(3)
+
+            # Always pan top-to-bottom by 200px
+            print("[CRASH] Panning top-to-bottom by 200px...")
+            subprocess.run([ADB, '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '500', '300', '500', '500', '500'], creationflags=CREATE_NO_WINDOW)
+
+            # Wait 3 seconds
+            print("[CRASH] Waiting 3 seconds...")
+            time.sleep(3)
+
+            # Move screen left to right 300px
+            print("[CRASH] Panning screen left to right by 300px...")
+            subprocess.run([ADB, '-s', '127.0.0.1:7555', 'shell', 'input', 'swipe', '400', '250', '700', '250', '500'], creationflags=CREATE_NO_WINDOW)
             
             print("[CRASH] Waiting 2 seconds after panning...")
             time.sleep(2)
@@ -319,7 +329,8 @@ class CrashHandler:
             # Zoom out
             print("[CRASH] Zooming out screen (using zoom.py)...")
             try:
-                subprocess.run(["python", "zoom.py"])
+                from zoom import zoom_out
+                zoom_out(0.65)
                 time.sleep(1)
             except Exception as e:
                 print(f"[CRASH] Error during zoom out: {e}")
